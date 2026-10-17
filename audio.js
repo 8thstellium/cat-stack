@@ -78,26 +78,26 @@
     for (var i = 0; i < notes.length; i++) {
       var when = at + i * 0.013;
       var frequency = hz(notes[i]);
-      oscillator('sine', frequency, when, 1.85, 0.017, keysBus, { attack: 0.028 });
-      oscillator('triangle', frequency, when, 1.2, 0.004, keysBus,
+      oscillator('sine', frequency, when, 1.85, 0.08, keysBus, { attack: 0.028 });
+      oscillator('triangle', frequency, when, 1.2, 0.02, keysBus,
         { attack: 0.025, detune: i % 2 ? 4 : -4 });
     }
   }
 
   function bass(midi, at) {
-    oscillator('sine', hz(midi), at, 0.49, 0.09, musicBus, { attack: 0.014 });
+    oscillator('sine', hz(midi), at, 0.49, 0.22, musicBus, { attack: 0.014 });
   }
 
   function kick(at) {
-    oscillator('sine', 110, at, 0.23, 0.14, musicBus,
+    oscillator('sine', 110, at, 0.23, 0.3, musicBus,
       { attack: 0.002, endFrequency: 45 });
   }
 
-  function snare(at) { noiseHit(at, 0.16, 0.055, 'bandpass', 1500, 0.5); }
-  function hat(at, strong) { noiseHit(at, 0.046, strong ? 0.025 : 0.014, 'highpass', 5600, 0.7); }
+  function snare(at) { noiseHit(at, 0.16, 0.12, 'bandpass', 1500, 0.5); }
+  function hat(at, strong) { noiseHit(at, 0.046, strong ? 0.05 : 0.03, 'highpass', 5600, 0.7); }
 
   function melody(midi, at) {
-    oscillator('triangle', hz(midi), at, 0.42, 0.019, musicBus, { attack: 0.003 });
+    oscillator('triangle', hz(midi), at, 0.42, 0.09, musicBus, { attack: 0.003 });
   }
 
   function scheduleStep(at) {
@@ -137,7 +137,7 @@
     var now = context.currentTime;
     master.gain.cancelScheduledValues(now);
     master.gain.setValueAtTime(master.gain.value, now);
-    master.gain.linearRampToValueAtTime(muted ? 0 : 0.65, now + 0.04);
+    master.gain.linearRampToValueAtTime(muted ? 0 : 1.0, now + 0.04);
   }
 
   function createGraph() {
@@ -145,7 +145,7 @@
     if (!AudioContextType) return false;
     context = new AudioContextType();
     master = context.createGain();
-    master.gain.value = muted ? 0 : 0.65;
+    master.gain.value = muted ? 0 : 1.0;
     var compressor = context.createDynamicsCompressor();
     compressor.threshold.value = -18;
     compressor.knee.value = 18;
@@ -156,7 +156,7 @@
     master.connect(context.destination);
 
     musicBus = context.createGain();
-    musicBus.gain.value = 0.75;
+    musicBus.gain.value = 1.6;
     var lowpass = context.createBiquadFilter();
     lowpass.type = 'lowpass';
     lowpass.frequency.value = 2400;
@@ -199,7 +199,7 @@
     var vinylGain = context.createGain();
     vinylSource.buffer = vinyl;
     vinylSource.loop = true;
-    vinylGain.gain.value = 0.08;
+    vinylGain.gain.value = 0.12;
     vinylSource.connect(vinylGain);
     vinylGain.connect(musicBus);
     vinylSource.start();
@@ -232,7 +232,7 @@
   function playDrop() {
     if (!context || context.state !== 'running') return;
     var at = context.currentTime + 0.005;
-    oscillator('sine', 520, at, 0.13, 0.1, effectsBus,
+    oscillator('sine', 520, at, 0.13, 0.18, effectsBus,
       { attack: 0.003, endFrequency: 300 });
   }
 
@@ -242,15 +242,15 @@
     var index = Math.max(0, Math.min(9, Math.floor(kind || 1) - 1));
     var midi = 72 + scale[index % scale.length] + 12 * Math.floor(index / scale.length);
     var at = context.currentTime + 0.005;
-    oscillator('triangle', hz(midi), at, 0.23, 0.065, effectsBus, { attack: 0.002 });
-    oscillator('sine', hz(midi + 12), at + 0.015, 0.15, 0.022, effectsBus, { attack: 0.002 });
+    oscillator('triangle', hz(midi), at, 0.23, 0.12, effectsBus, { attack: 0.002 });
+    oscillator('sine', hz(midi + 12), at + 0.015, 0.15, 0.04, effectsBus, { attack: 0.002 });
   }
 
   function playMega() {
     if (!context || context.state !== 'running') return;
     var at = context.currentTime + 0.005;
     [77, 81, 84, 88, 91].forEach(function (midi, index) {
-      oscillator('triangle', hz(midi), at + index * 0.065, 0.48, 0.045, effectsBus,
+      oscillator('triangle', hz(midi), at + index * 0.065, 0.48, 0.09, effectsBus,
         { attack: 0.003 });
     });
   }
