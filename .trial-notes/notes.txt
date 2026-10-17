@@ -1,0 +1,1 @@
+16:39:12 F8 (agentchattr): Codex's first-run folder-trust prompt is not detected as waiting_approval; dashboard showed idle for 12 min while the session's Critique turn waited.

@@ -1,0 +1,81 @@
+152 | 16:51:12 | user | general | Plan approved as synthesised in message 150. Build it now in this folder. Ownership so you never edit the same file: @claude owns index.html, cats.js, game.js (physics, input, loop, drawing, UI, selftest). @codex owns audio.js (the lofi engine and SFX), vendor/matter.min.js (download Matter.js 0.19.0 from its GitHub release or jsDelivr and record the version and MIT licence in CREDITS.md), test/rules.test.js (node tests against cats.js once Claude posts its pure-function API), and TESTING.md (the human smoke checklist). Interface contract for audio.js, so Claude can code against it before it exists: window.CatStack.audio = { start(), toggleMute() -> boolean muted, isMuted(), playDrop(), playMerge(kind), playMega() }; start() must be safe to call on every user gesture and only create the AudioContext once. Each of you: post a short summary when your files are done, with what you ran (node test/rules.test.js; any syntax check like node --check), then review the other's files: read them, run what you can, reply APPROVE or a numbered CHANGES list, max 2 rounds. Do NOT commit. Say clearly what still needs a human in a browser.
+153 | 16:51:17 | codex | general | I’m taking audio.js, vendor/matter.min.js, CREDITS.md, test/rules.test.js, and TESTING.md. I’ll use the agreed audio API and wait for your cats.js pure-function API before finalizing the Node tests. I won’t touch index.html, cats.js, or game.js.
+154 | 16:51:30 | claude | general | @codex Ack, building index.html / cats.js / game.js now. Here's the **cats.js pure API** so you can write test/rules.test.js. Load it with `const C = require('../cats.js')`; in the browser the same object is `window.CatStack.cats`.
+
+- `C.KINDS`: an array of 10 entries `{kind, name, color, radius}`. `kind` runs 1..10, and `KINDS[i].kind === i+1`. Radii are **14,19,25,32,40,48,57,66,75,84**.
+- `C.MAX_KIND = 10`, `C.DROP_KINDS = 5`
+- `C.WORLD = {W:400, H:640, left:20, right:380, floor:620, dangerY:100}`. The inner width is 360.
+- `C.kindInfo(k)` returns the KINDS entry, or throws if k is out of range.
+- `C.mergeResult(k)` returns `k+1` if k < 10, or `null` for 10 (two Megas vanish).
+- `C.mergeScore(k)` is the points for merging two kind-k cats: `T(k+1) = (k+1)(k+2)/2` for k < 10, and `C.MEGA_BONUS = 100` for k = 10.
+- `C.makeRng(seed)` is a seeded mulberry32 returning floats in [0,1). The same seed gives the same sequence.
+- `C.nextKind(rng)` returns an integer from 1 to `DROP_KINDS`.
+- `C.DANGER = {LOSE_MS:1000, GRACE_MS:600, REST_SPEED:0.3, REST_SPIN:0.05}`
+- `C.dangerStep(timers, dtMs, cats)` returns `{timers, lost, level}` and **is pure**, so it never mutates its input.
+  - `timers` is an object `{[id]: ms}`.
+  - Each entry in `cats` is `{id, y, radius, speed, spin, touched, ageMs, active}`.
+  - A cat counts only if `!active && touched && ageMs >= GRACE_MS && speed < REST_SPEED && |spin| < REST_SPIN && (y - radius) < dangerY`. Its timer then grows by dt; otherwise the timer is removed (reset).
+  - `lost` is true when any timer reaches `LOSE_MS` or more. `level` is the max timer divided by LOSE_MS, clamped to 0..1.
+
+The interface contract for audio.js is noted. I'll guard every audio call, so the game also runs if audio.js fails to load.
+155 | 16:51:34 | codex | general | Got the cats.js API. I’ll write the Node tests against that contract and run them once your file lands.
+156 | 16:52:38 | codex | general | My files are written: audio.js (generated lofi loop/SFX with the agreed API), vendored Matter.js 0.19.0, CREDITS.md with its MIT text and SHA-256, test/rules.test.js, and TESTING.md. `node --check audio.js` and `node --check test/rules.test.js` pass; Node loads the vendor build and reports Matter.js 0.19.0. `node test/rules.test.js` awaits cats.js, which is still being written. I’ll run it and review your files as soon as they land. No commit.
+157 | 16:53:33 | codex | general | cats.js is now present: `node test/rules.test.js` passes all six rule groups, and `node --check cats.js` passes. I’m reviewing the full integration once index.html and game.js land.
+158 | 16:56:01 | codex | general | Review round 1 of index.html/cats.js/game.js: `node --check cats.js`, `node --check game.js`, and `node test/rules.test.js` all pass. CHANGES:
+1. In game.js `selftest()`, “two top cats fit side by side” checks `2 * radius <= width`; it must check `4 * radius <= width` (two diameters). The Node test has the correct condition.
+2. In game.js keydown, Space while the focused Restart button is shown neither calls `restart()` nor lets the button's native click fire (`preventDefault` runs). Make Space restart as Enter does.
+I’m continuing the integration review. Browser feel, audio quality, touch, and layout still need human checks.
+159 | 16:57:55 | claude | general | **Claude: my files are done.** `index.html`, `cats.js` and `game.js` are written. Nothing is committed.
+
+**What's in them**
+- `cats.js`: the pure API exactly as posted in message 154, plus the procedural cat drawing (`paintCat` and `getSprite`, cached per scale).
+- `game.js`:
+  - Matter physics with a fixed 1/60 timestep, at most 4 steps per frame, and any leftover backlog dropped.
+  - Merges: matching pairs are collected after `Engine.update` and then applied. The merged cat is full size, and the pop animation is render-only. After a merge every cat is woken, so nothing floats in mid-air.
+  - Game over runs through `dangerStep`. A pulsing danger line warns first, then an overlay shows score, best and "new best!".
+  - Input works by pointer (aim, release to drop), keyboard (arrows or A/D to aim; Space, Enter or Down to drop; M to mute; R to restart) and touch.
+  - Pause on hidden tab, a DPR-aware canvas that scales with letterboxing, best score in localStorage, render-only squash on landing, a merge ring, and Mega confetti.
+  - Every audio call is guarded, so the game still runs without sound.
+- `?selftest` shows a panel with 17 checks (click it to hide). `window.CatStack.game` is a small debug handle.
+
+**What I ran**
+- `node --check` on all JS files: ok.
+- `node test/rules.test.js`: 6/6 pass.
+- `sha256sum vendor/matter.min.js` matches the hash in CREDITS.md.
+- **Headless sim:** node with a stubbed DOM loading the real game.js, driving it with pointer events:
+  - Selftest: 17/17 pass.
+  - 3 seeded random games ended after 115–136 drops (scores 1209–1384, highest kind reached 8–9). Each loss was triggered only by **resting** cats (speed 0, age ≥ 1.5 s). The fresh falling cats above the line (age < 200 ms) were correctly ignored.
+  - A 29-cat pile slept fully with max speed 0.000 after 3 s and after 10 s, so there's no jitter in the sim.
+  - Two Megas resting against the walls coexist (they fit side by side). Two touching Megas vanish for +100 and trigger playMega.
+  - An overlapping spawn produced a long chain merge cleanly.
+- **Headless Edge screenshots** at phone and desktop sizes: layout, HUD and all 10 cats render (image attached). Since the screenshot I moved the Calico's grey patch off its cheek.
+
+**Review of Codex's files: APPROVE** (round 1)
+- `audio.js`:
+  - Matches the contract.
+  - `start()` creates the AudioContext only once.
+  - Effects bypass the low-pass. The hum is gone, the low-pass is at 2.4 kHz with a gentle sweep, and the melody (D5–C6) sits above the chords (≤ A4).
+  - The chord spellings and bass roots/fifths are correct. Swing is 62/38 across each beat.
+  - It suspends with the tab hidden and resyncs on return, and mute persists.
+  - Non-blocking: the planned 4 Hz Rhodes tremolo was left out, which is fine.
+- `test/rules.test.js` covers the contract well, including the purity check and the timer reset.
+- `TESTING.md` and `CREDITS.md` are good, and the hash I computed matches.
+
+**Still needs a human in a browser or on a phone**
+- How the physics feels: drop weight with gravity at 1.2, plushness, and how hard a full-size merge shoves its neighbours.
+- Whether a Mega Loaf is actually reachable by a real player.
+- The music and sound effects: mix, volume, crackle level, and whether anything is harsh on phone speakers.
+- Touch feel on a real phone.
+- Whether the cats look cute at small sizes.
+- Hide-and-restore of the tab in a real browser.
+160 | 16:58:19 | claude | general | @codex Thanks, both points were real bugs. Both are fixed in game.js.
+1. The selftest now checks `4 * radius <= width`, i.e. two diameters. The old check could never fail.
+2. Space, Enter or Down after game over now always restarts, whatever has focus. It ignores key repeat.
+
+Verified:
+- `node --check game.js`: ok.
+- `node test/rules.test.js`: 6/6.
+- Headless sim: selftest 17/17. In a real seeded game that ended in game over with the Restart button focused, pressing Space restarted it (0 cats, score 0, state play).
+
+That's round 2 from my side. Please APPROVE, or raise anything else from your integration review. My earlier APPROVE of your files stands. Nothing is committed. The human browser and phone checks are listed in message 159 and TESTING.md.
+161 | 16:58:27 | codex | general | APPROVE (round 2). I verified both fixes in game.js: the selftest uses `4 * radius <= width`, and Space/Enter/Down restart without key repeat. `node --check game.js` and `node test/rules.test.js` pass (6/6); no commit. One note on my files: after your review I added the planned gentle 4 Hz tremolo to the keyboard bus in audio.js; `node --check audio.js` passes. Human browser/phone checks remain for audio quality, touch feel, visual appeal, and real-device physics.

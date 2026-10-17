@@ -1,0 +1,152 @@
+142 | 16:25:48 | system | general | Session started: Design Critique
+143 | 16:25:48 | system | general | Phase: Present
+144 | 16:26:44 | claude | general | **cat-stack: build plan (Presenter, phase 1/3)**. I've read SPEC.md. Here's the plan; what I'd like critiqued is at the bottom.
+
+**1. Physics: Matter.js 0.19 (MIT), vendored as `vendor/matter.min.js`**
+- Why: it's one UMD file (~80 KB) that works from file://. Circles, friction, restitution and `sleeping` are built in. Merge detection is easy because `collisionStart`/`collisionActive` events hand you body pairs. Pixel units, so there's no metre conversion.
+- Planck.js (a Box2D port) stacks more stably, but it costs more boilerplate and unit scaling. Matter's weak spot is jitter in tall piles. To counter that I'll use a fixed 1/60 timestep with an accumulator, positionIterations 10 and velocityIterations 8, sleeping enabled, and fairly high friction. Plush tuning to start from: restitution 0.15, friction 0.5, frictionStatic 0.8, frictionAir 0.012, density scaled so big cats don't launch small ones. If you think Planck is worth the cost, argue it now.
+
+**2. Files** (no modules, because ES modules are blocked on file:// in Chrome)
+`index.html` (inline CSS, script tags) · `cats.js` (ladder data, pure rules, procedural drawing) · `audio.js` (lofi engine and SFX) · `game.js` (engine, input, loop, UI) · `vendor/matter.min.js` · `CREDITS.md` · `test/rules.test.js`
+Each file attaches to `window.CatStack`. `cats.js` also sets `module.exports` when it runs under node, so `node test/rules.test.js` can test it.
+
+**3. Cat ladder** (logical canvas is 400×640, container inner width 360)
+| # | name | colour | r |
+|---|---|---|---|
+| 1 | Mochi | #F9C6D3 pink | 14 |
+| 2 | Peach | #FFD3B0 | 19 |
+| 3 | Butter | #FFF0A8 | 25 |
+| 4 | Mint | #C6EFD6 | 32 |
+| 5 | Sky | #BFE2F7 | 40 |
+| 6 | Lilac | #D8C7F4 | 49 |
+| 7 | Coral | #FFB4A6 | 59 (gets a bow) |
+| 8 | Sage | #CFE2B6 | 70 (bow + belly patch) |
+| 9 | Calico | #F4E6D2 with apricot and grey patches | 82 |
+| 10 | Mega Loaf | #FFF8F0 cream with rainbow bow and tiny crown | 96 |
+- Only kinds 1–5 are dropped, from a seeded RNG. Two Mega Loafs merging both vanish with a confetti burst, a screen nudge and a bonus.
+- Scoring (Suika style): a merge into kind k scores T(k) = k(k+1)/2, and the Mega pair bonus is 100.
+
+**4. Drawing the cats procedurally**
+- Each cat is drawn in local coordinates under `ctx.rotate(body.angle)`, so you can see it roll. Layers in order:
+  1. A soft body circle with a radial gradient (lighter top-left) and a 1.5 px darker outline.
+  2. Two rounded-triangle ears with pink inner ears.
+  3. Closed "^ ^" eyes drawn as arcs, plus a tiny "w" mouth.
+  4. Blush ellipses at 35% alpha.
+  5. Stripes or patches, bow and crown by tier.
+- Each kind is pre-rendered once to an offscreen canvas at devicePixelRatio, then drawn with `drawImage` for speed.
+- Squash and stretch is render-only: per-body spring values for scaleX/scaleY get kicked on landing impact (from collision speed) and on merge spawn. The physics bodies stay true circles.
+- An idle "breathing" wobble (±1.5%, phase offset per cat) runs on sleeping cats.
+
+**5. Lofi audio (Web Audio only, look-ahead scheduler: 25 ms tick, 100 ms horizon)**
+- 72 BPM, F major. The 4-bar loop is Gm9 → C13 → Fmaj9 → Dm9, i.e. ii–V–I–vi.
+- Keys: Rhodes-ish, made from a sine plus a quiet detuned triangle with fast attack, exponential decay and a 4 Hz tremolo. Voicings stay in the mid range, with chords pushed slightly before or after the beat.
+- Bass: a sine with a soft envelope playing root on beat 1 and the fifth on the "and" of 3.
+- Drums:
+  - Kick: a soft sine dropping 110→45 Hz.
+  - Snare: a bandpassed noise "brush" on beats 2 and 4.
+  - Hats: highpassed noise ticks, swung 8ths at about 62%, with velocity humanised.
+- Melody: a music-box triangle playing a 5-note F-pentatonic motif every other loop, with one note varied each time.
+- Vinyl: a looped noise buffer with sparse random clicks and a faint 60 Hz hum, all at very low gain.
+- Master chain: low-pass at about 1.6 kHz, with a 0.05 Hz LFO sweeping ±400 Hz, a slight wow (pitch LFO ±5 cents), and a gentle compressor.
+- Audio starts on the first pointerdown or keydown. The mute toggle ramps master gain and is saved in localStorage.
+- SFX: the drop is a soft sine "boop" (520→300 Hz). The merge is a pluck whose pitch climbs the pentatonic with kind k. The Mega merge is a rolled Fmaj9 arpeggio with a sparkle.
+
+**6. Core loop and game over**
+- Input:
+  - Pointer events cover mouse and touch: move to aim, release to drop.
+  - Arrow keys move the aim and space drops.
+  - Cooldown is 500 ms, and the aim is clamped to the walls minus the cat's radius.
+- Merging: equal-kind pairs from collision events are marked `merging` so a cat can't be used twice in one step. The new cat spawns at the midpoint with the averaged velocity.
+  - Its radius grows from 70% to 100% over about 6 frames using `Body.scale`, so it doesn't suddenly shove its neighbours.
+  - Merges also make a pop particle ring.
+- Danger line at y = 100:
+  - A cat counts only once it has touched something and only after 600 ms of grace since its drop.
+  - If any counted cat's top edge stays above the line for 1.0 s, the game ends.
+  - The line starts pulsing pink after 0.3 s.
+- Game-over overlay: final score, best score (localStorage), a "new best!" tag and a big Restart button. Physics freezes and the cats keep breathing.
+- Pause on `visibilitychange`. The canvas scales to fit at a fixed aspect ratio (letterboxed) and is DPR-aware.
+
+**7. Testing**
+- Node tests for the ladder (monotonic radius, distinct colours), `mergeResult(k)`, scoring, the seeded `nextKind`, and a pure `dangerTimer(state, dt, cats)` game-over function.
+- `index.html?selftest` runs the same checks in the page.
+- A human still has to judge: physics feel, how the audio sounds, how cute the cats are, and phone layout.
+
+**Feedback I need:**
+1. Matter vs Planck: is the jitter mitigation enough?
+2. Are 10 kinds with radius 14→96 in a 360-wide box right, or too crowded or too easy?
+3. Should the merge spawn grow with `Body.scale` or spawn at full size?
+4. Is the game-over rule (contact + grace + 1 s) fair, and is the danger line at y = 100 right?
+5. Audio: is the chord loop and mix sensible? Is anything going to sound harsh or busy?
+6. Is anything in the "nice to have" list worth cutting so the core stays solid?
+145 | 16:26:45 | system | general | Phase: Critique
+146 | 16:39:19 | user | general | @codex you were stuck on a folder-trust prompt (accepted now). It is your Critique turn in the Design Critique session: please read SPEC.md and Claude's plan in message 144 and post your critique.
+147 | 16:49:47 | user | general | @codex trust prompt is now accepted. It is your Critique turn: read SPEC.md and Claude's plan (message 144) and post your critique.
+148 | 16:50:12 | codex | general | @claude I read SPEC.md and your plan. Matter.js is a sensible file:// choice; fixed 60 Hz steps, sleeping, and extra iterations are a good starting point. Treat pile stability as a browser feel test rather than assuming those settings solve jitter. Keep the accumulator capped after tab suspension so the engine does not run a large backlog.
+
+The main spec gap is game over: it calls for a *resting* cat above the line for ~1 s. “Has touched something” can include a cat still moving through the pile, and 600 ms may expire before it settles. Gate the timer on low linear/angular speed (or Matter sleeping), reset it whenever that cat moves back below the line or starts moving, and give newly merged cats their own grace. Make sure the current falling/aimed cat cannot trigger loss.
+
+I would spawn the merged physics body at its full radius and animate only its drawing scale from 70% to 100%. Repeated Body.scale calls change mass and collision bounds while neighbours are in contact, which may introduce the very pile instability you are trying to avoid. If full-radius creation causes too much shove, measure that in the browser and tune merge placement/velocity; avoid simultaneous pair reuse by collecting pairs and applying merges after the physics update.
+
+Ten kinds satisfy the spec. The 360 px box is tight at the top: two radius-96 Mega Loafs cannot sit side by side (384 px), so their final merge requires vertical stacking. That is fine if intentional, but test whether it is reachable before overflow. Peach/Coral and Calico/Mega are close in colour; the planned patches/accessories should make those tiers unmistakable at phone size.
+
+The chord progression and swing fit the brief. I would skip the 60 Hz hum (it can read as electrical buzz) and keep crackle sparse. A 1.6 kHz master low-pass may bury hats, merge sparkle, and the music-box motif; route SFX around it or use a gentler filter. Also avoid making the melody/chord voicings compete in the same register. Prioritize the playable loop, responsive mobile controls, and readable UI before wow/flutter, breathing, screen nudge, and elaborate particles.
+
+For verification, add an in-browser smoke check for file:// loading, touch/keyboard drop, a crowded pile, a chain merge, game-over reset, and audio unlock/mute. Pure-function tests alone will not catch those interactions. No commit, per SPEC.md.
+149 | 16:50:13 | system | general | Phase: Synthesis
+150 | 16:50:45 | claude | general | **Synthesis (3/3): cat-stack plan after critique.** Thanks @codex. Every point you raised holds up; I've taken them all into the plan.
+
+**KEEP (agreed, no change)**
+- **Physics engine:** Matter.js 0.19, vendored, loaded with plain script tags (no modules). Fixed 1/60 timestep, sleeping on, raised solver iterations.
+- **File layout:** `index.html`, `cats.js`, `audio.js`, `game.js`, `vendor/`, `CREDITS.md`, `test/`. Shared through `window.CatStack`, plus `module.exports` so node can load it.
+- **Ladder and scoring:** 10 kinds, only kinds 1–5 are dropped. A merge into kind k scores T(k), and merging two Mega Loafs gives a +100 bonus.
+- **Cat drawing:** procedural cats pre-rendered once to offscreen canvases. Squash and stretch is render-only.
+- **Music:** 72 BPM in F major, chords Gm9–C13–Fmaj9–Dm9, swung hats, brush snare, sine bass, look-ahead scheduler.
+- **Rules:** audio starts on the first gesture and mute is saved. Pause when the tab is hidden. No commits.
+
+**CHANGE (do these; P0 first)**
+- **P0 Game over must require a resting cat** (the spec says resting):
+  - A cat only counts when it is not the aimed or falling cat, it has touched something, and its speed and spin are below a threshold (or Matter has put it to sleep).
+  - Each cat keeps its own above-line timer. The timer resets the moment the cat drops back below the line or starts moving again.
+  - Newly merged cats get their own 600 ms grace.
+  - This logic stays a pure function, so node can test it.
+- **P0 Merge at full size, no `Body.scale`:**
+  - Collect matching pairs during the step and apply the merges after `Engine.update`. A `consumed` set stops a cat from merging twice.
+  - The new cat is a full-radius body at the midpoint with the parents' averaged velocity.
+  - The 70→100% pop is drawing scale only.
+  - Reasoning: the child's area is about 1.44× one parent and less than the two parents combined, so the full-size cat should usually fit the hole they leave.
+- **P0 Cap the physics catch-up:** run at most 4 physics steps per frame and throw away the rest of the backlog, so the game doesn't race through a burst of frames after the tab was suspended.
+- **P0 The top of the ladder must physically fit.** Two r96 cats need 384 px but the box is 360 px wide. New radii: **14, 19, 25, 32, 40, 48, 57, 66, 75, 84**. Two 84s need 336 px, so they fit side by side.
+- **P1 Make similar colours distinct at phone size:**
+  - Tier 7 becomes **Berry #F2A2C8** (deeper pink) with a bow, instead of Coral, which was too close to Peach.
+  - Mega Loaf gets a lavender→pink gradient body, a gold crown and a rainbow bow, so it reads clearly against Calico's cream with apricot and grey patches.
+- **P1 Audio mix:**
+  - Drop the 60 Hz hum and make the crackle sparser.
+  - The music low-pass rises to about 2.4 kHz with a gentler sweep.
+  - Sound effects go on their own bus that skips the filter, so the drop, merge and sparkle sounds stay crisp.
+  - Chord voicings stay roughly between C3 and C5, and the music-box melody sits an octave above them (about F5–C6).
+- **P2 Cut or defer** until the core is solid: wow/flutter, idle breathing, screen nudge, elaborate particles. The first pass keeps only a simple pop ring plus Mega confetti.
+
+**INVESTIGATE (needs a browser and a human)**
+1. Whether a tall pile jitters at the chosen settings. If it does, tune friction, restitution and sleeping thresholds before considering Planck.js.
+2. Whether a Mega+Mega merge can realistically happen before the pile overflows. If not, lower the danger line or shrink the radii further.
+3. How much a full-size merge shoves its neighbours in a crowded pile. If it's too much, tune placement and velocity damping.
+4. How the music and sound effects sound on phone speakers (harsh or muddy?) and how loud the crackle is.
+
+**VERIFY**
+- **Node tests:**
+  - Ladder: radii only grow, colours are all different, and two top cats fit within 360 px.
+  - Merge result, scoring and the seeded next-cat picker.
+  - The game-over timer for a falling cat, a moving cat, a resting cat, and a cat that drops back below the line.
+- **`?selftest`** runs the same checks inside the page.
+- **Human smoke checklist (I'll put it in `TESTING.md`):**
+  - The game loads from file:// with no errors.
+  - Dropping works by mouse, touch and keyboard.
+  - A crowded pile stays stable.
+  - Chain merges work.
+  - Game over fires, and Restart resets everything.
+  - The best score persists.
+  - Audio unlocks on the first gesture and mute works.
+  - The layout works at phone width.
+
+Next step: I'll build in that order (P0 → P1 → tests → P2 if it's cheap) and report what's done and what still needs eyes in the browser.
+151 | 16:50:45 | system | general | Session complete: Design Critique
